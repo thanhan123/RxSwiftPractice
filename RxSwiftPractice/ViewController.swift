@@ -6,59 +6,67 @@
 //  Copyright © 2017 Dinh Thanh An. All rights reserved.
 //
 
-import Moya
-import Moya_ModelMapper
 import UIKit
 import RxCocoa
 import RxSwift
-import Mapper
+import ObjectMapper
+import RxAlamofire
 
-struct Repository: Mappable {
-    
-    let identifier: Int
-    let language: String
-    let name: String
-    let fullName: String
-    
-    init(map: Mapper) throws {
-        try identifier = map.from("id")
-        try language = map.from("language")
-        try name = map.from("name")
-        try fullName = map.from("full_name")
-    }
-}
+//struct Repository: Mappable {
+//    
+//    let identifier: Int
+//    let language: String
+//    let name: String
+//    let fullName: String
+//    
+//    init(map: Mapper) throws {
+//        try identifier = map.from("id")
+//        try language = map.from("language")
+//        try name = map.from("name")
+//        try fullName = map.from("full_name")
+//    }
+//}
+//
+//struct Issue: Mappable {
+//    
+//    let identifier: Int
+//    let number: Int
+//    let title: String
+//    let body: String
+//    
+//    init(map: Mapper) throws {
+//        try identifier = map.from("id")
+//        try number = map.from("number")
+//        try title = map.from("title")
+//        try body = map.from("body")
+//    }
+//}
 
-struct Issue: Mappable {
+class RepositoriesViewController: UIViewController {
     
-    let identifier: Int
-    let number: Int
-    let title: String
-    let body: String
-    
-    init(map: Mapper) throws {
-        try identifier = map.from("id")
-        try number = map.from("number")
-        try title = map.from("title")
-        try body = map.from("body")
-    }
-}
-
-class ViewController: UIViewController {
-    
+    @IBOutlet weak var tableViewBottomConstraint: NSLayoutConstraint!
     @IBOutlet weak var tableView: UITableView!
     @IBOutlet weak var searchBar: UISearchBar!
-    
     let disposeBag = DisposeBag()
-    var provider: RxMoyaProvider<GitHub>!
-    var latestRepositoryName: Observable<String> {
+    var repositoryNetworkModel: RepositoryNetworkModel!
+    
+    var rx_searchBarText: Observable<String> {
         return searchBar
-            .rx.text
-            .orEmpty
-            .debounce(0.5, scheduler: MainScheduler.instance)
+            .rx
+            .text
+            .filter { $0!.characters.count > 0 }
+            .throttle(0.5, scheduler : MainScheduler.instance)
+            .map(){text -> String in
+                if(text == nil){
+                    return ""
+                }else{
+                    return text!
+                }
+            }
             .distinctUntilChanged()
     }
     
-    var issueTrackerModel: IssueTrackerModel!
+//    var issueTrackerModel: IssueTrackerModel!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -66,43 +74,27 @@ class ViewController: UIViewController {
     }
     
     func setupRx() {
-        // First part of the puzzle, create our Provider
-        provider = RxMoyaProvider<GitHub>()
+        repositoryNetworkModel = RepositoryNetworkModel(withNameObservable: rx_searchBarText)
         
-        // Here we tell table view that if user clicks on a cell,
-        // and the keyboard is still visible, hide it
-        tableView
-            .rx.itemSelected
-            .subscribe(onNext: { indexPath in
-                if self.searchBar.isFirstResponder == true {
-                    self.view.endEditing(true)
-                }
-            })
-            .addDisposableTo(disposeBag)
-        
-        // Now we will setup our model
-        issueTrackerModel = IssueTrackerModel(provider: provider, repositoryName: latestRepositoryName)
-        
-        // And bind issues to table view
-        // Here is where the magic happens, with only one binding
-        // we have filled up about 3 table view data source methods
-        issueTrackerModel
-            .trackIssues()
-            .bindTo(tableView.rx.items) { tableView, row, item in
-                let cell = tableView.dequeueReusableCell(withIdentifier: "issueCell", for: IndexPath(row: row, section: 0))
-                cell.textLabel?.text = item.title
+        repositoryNetworkModel
+            .rx_repositories
+            .drive(tableView.rx.items) { (tv, i, repository) in
+                let cell = tv.dequeueReusableCell(withIdentifier: "repositoryCell", for: IndexPath(row: i, section: 0))
+                cell.textLabel?.text = repository.name
                 
                 return cell
             }
             .addDisposableTo(disposeBag)
         
-        // Here we tell table view that if user clicks on a cell,
-        // and the keyboard is still visible, hide it
-        tableView
-            .rx.itemSelected
-            .subscribe(onNext: { indexPath in
-                if self.searchBar.isFirstResponder == true {
-                    self.view.endEditing(true)
+        repositoryNetworkModel
+            .rx_repositories
+            .drive(onNext: { repositories in
+                if repositories.count == 0 {
+                    let alert = UIAlertController(title: ":(", message: "No repositories for this user.", preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                    if self.navigationController?.visibleViewController?.isMember(of: UIAlertController.self) != true {
+                        self.present(alert, animated: true, completion: nil)
+                    }
                 }
             })
             .addDisposableTo(disposeBag)
